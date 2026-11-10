@@ -1,0 +1,117 @@
+name: CI / CD Pipeline
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+jobs:
+  lint-and-test:
+    name: Tests & Validation Qualité
+    runs-on: ubuntu-latest
+
+    services:
+      # Service MinIO S3 compatible pour les tests d'intégration Niveau 2
+      minio:
+        image: minio/minio:RELEASE.2024-01-18T22-51-28Z
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+        command: server /data
+
+    steps:
+      - name: Récupération du code source
+        uses: actions/checkout@v4
+
+      - name: Configuration de Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Installation des dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Vérification de la syntaxe et du typage
+        run: |
+          python -m compileall data_pipeline/ tests/ config/
+
+      - name: Exécution des tests unitaires et d'intégration (Pytest)
+        run: |
+          pytest -v --durations=10
+
+      - name: Test Pipeline Niveau 1 (Locale - Génération & Exécution initiale)
+        run: |
+          python -m data_pipeline.pipeline --generate --data-dir data/raw --db-url sqlite:///data/finance_ci.db
+
+      - name: Test Idempotence Niveau 1 (Anti-doublon lors d'une ré-exécution)
+        run: |
+          # La 2ème exécution doit ignorer tous les fichiers déjà traités
+          python -m data_pipeline.pipeline --data-dir data/raw --db-url sqlite:///data/finance_ci.db
+
+      - name: Test Niveau 1.6 - Simulation d'échec & Récupération après correction
+        run: |
+          # 1. Génération d'un fichier corrompu
+          python -m data_pipeline.generator --output-dir data/raw_corrupted --corrupted
+          
+          # 2. La pipeline doit échouer avec code de retour non-zéro
+          echo "Test de l'échec attendu sur fichier corrompu..."
+          ! python -m data_pipeline.pipeline --data-dir data/raw_corrupted --db-url sqlite:///data/finance_ci.db
+          echo "Échec correctement détecté !"
+          
+          # 3. Correction apportée : remplacement par un batch valide
+          python -m data_pipeline.generator --output-dir data/raw_corrupted
+          
+          # 4. Succès de la pipeline après correction
+          python -m data_pipeline.pipeline --data-dir data/raw_corrupted --db-url sqlite:///data/finance_ci.db
+          echo "Pipeline réussie après correction !"
+
+      - name: Test Pipeline Niveau 2 (Intégration S3 avec MinIO)
+        env:
+          S3_ENDPOINT_URL: http://localhost:9000
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+          S3_BUCKET_NAME: finance-transactions
+          DB_URL: sqlite:///data/s3_finance_ci.db
+        run: |
+          python -c "
+          from data_pipeline.s3_service import run_s3_pipeline;
+          res = run_s3_pipeline(endpoint_url='http://localhost:9000', bucket_name='finance-transactions', db_url='sqlite:///data/s3_finance_ci.db');
+          assert res['processed_files'] == 3, f'Expected 3 processed, got {res}';
+          assert res['total_transactions_inserted'] == 21;
+          print('Test S3 réel MinIO validé avec succès !');
+          "
+
+      - name: Test Pipeline Niveau 3 Option 3 (Extraction SLM depuis texte brut)
+        run: |
+          python -c "
+          from data_pipeline.slm_extractor import process_unstructured_text_into_pipeline;
+          text = 'Le 12 septembre 2026 à 14h30, le compte FR7630006000011234567890189 chez BNP Paribas a envoyé 6200 € vers le compte DE89370400440532013000 en Allemagne.';
+          res = process_unstructured_text_into_pipeline(text, source_name='ci_slm_test', db_url='sqlite:///data/slm_ci.db');
+          assert res['extracted_count'] == 1;
+          assert res['db_status'] == 'INSERTED';
+          print('Test SLM validé avec succès !');
+          "
+
+  docker-build:
+    name: Build Image Docker (Niveau 3 Option 1)
+    runs-on: ubuntu-latest
+    needs: [lint-and-test]
+
+    steps:
+      - name: Récupération du code source
+        uses: actions/checkout@v4
+
+      - name: Construction de l'image Docker de la Pipeline
+        run: |
+          docker build -t finance-data-pipeline:latest -f docker/Dockerfile .

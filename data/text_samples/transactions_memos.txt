@@ -1,0 +1,3 @@
+Le 12 septembre à 14h30, le compte FR7630006000011234567890189 chez BNP Paribas a envoyé 6200 € vers le compte DE89370400440532013000 appartenant à une banque allemande.
+Notification de virement : Émetteur FR7610011000229876543210987 chez Société Générale vers destinataire ES9121000418450200051332 d'un montant de 1450.50 EUR le 2026-11-05T15:00:00.
+Transfert international : Compte IT60X0542811101000000123456 chez Intesa Sanpaolo a transféré 10500 € vers le compte FR7630006000011234567890189 le 2026-11-08T09:30:00.
