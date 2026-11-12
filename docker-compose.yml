@@ -1,9 +1,7 @@
-version: "3.8"
-
 services:
-  # 1. Service S3 Local (MinIO) - Niveau 2
+  # 1. Service S3 Local (Silo / compatible MinIO) - Niveau 2
   s3-minio:
-    image: minio/minio:RELEASE.2024-01-18T22-51-28Z
+    image: pgsty/silo:latest
     container_name: pipeline_s3_minio
     ports:
       - "9000:9000"   # S3 API
@@ -22,7 +20,7 @@ services:
 
   # Initialisation du bucket S3 'finance-transactions'
   minio-init-bucket:
-    image: minio/mc:latest
+    image: pgsty/silo:latest
     container_name: pipeline_minio_init
     depends_on:
       s3-minio:

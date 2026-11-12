@@ -12,9 +12,9 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      # Service MinIO S3 compatible pour les tests d'intégration Niveau 2
+      # Service S3 compatible MinIO (Silo) pour les tests d'intégration Niveau 2
       minio:
-        image: minio/minio:RELEASE.2024-01-18T22-51-28Z
+        image: pgsty/silo:latest
         ports:
           - 9000:9000
         env:
@@ -48,7 +48,7 @@ jobs:
 
       - name: Exécution des tests unitaires et d'intégration (Pytest)
         run: |
-          pytest -v --durations=10
+          python -m pytest -v --durations=10
 
       - name: Test Pipeline Niveau 1 (Locale - Génération & Exécution initiale)
         run: |
@@ -66,14 +66,15 @@ jobs:
           
           # 2. La pipeline doit échouer avec code de retour non-zéro
           echo "Test de l'échec attendu sur fichier corrompu..."
-          ! python -m data_pipeline.pipeline --data-dir data/raw_corrupted --db-url sqlite:///data/finance_ci.db
+          ! python -m data_pipeline.pipeline --data-dir data/raw_corrupted --db-url sqlite:///data/failure_ci.db
           echo "Échec correctement détecté !"
           
-          # 3. Correction apportée : remplacement par un batch valide
+          # 3. Correction apportée : suppression du fichier corrompu et génération de batchs valides
+          rm -f data/raw_corrupted/transactions_corrupted.csv
           python -m data_pipeline.generator --output-dir data/raw_corrupted
           
           # 4. Succès de la pipeline après correction
-          python -m data_pipeline.pipeline --data-dir data/raw_corrupted --db-url sqlite:///data/finance_ci.db
+          python -m data_pipeline.pipeline --data-dir data/raw_corrupted --db-url sqlite:///data/failure_ci.db
           echo "Pipeline réussie après correction !"
 
       - name: Test Pipeline Niveau 2 (Intégration S3 avec MinIO)
